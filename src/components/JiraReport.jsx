@@ -18,61 +18,101 @@ import {
   Drawer,
   List,
   ListItem,
-  ListItemText
+  ListItemText,
 } from '@mui/material';
 import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas';
-import { Doughnut } from 'react-chartjs-2';
-import { Chart as ChartJS, ArcElement, Tooltip, Legend } from 'chart.js';
 import axios from 'axios';
-
-ChartJS.register(ArcElement, Tooltip, Legend);
 
 const JiraReport = () => {
   const [projects, setProjects] = useState([]);
   const [project, setProject] = useState('');
-  const [sprint, setSprint] = useState('');
   const [sprintData, setSprintData] = useState(null);
-  const [open, setOpen] = useState(false);
+  const [assigneeFilter, setAssigneeFilter] = useState('');
   const [error, setError] = useState(null);
   const [loadingSprints, setLoadingSprints] = useState(false);
 
-  // Buscar todos os projetos ao carregar a página
   useEffect(() => {
     const fetchProjects = async () => {
       try {
-        const projectsResponse = await axios.get('http://localhost:3000/api/projects');
-        setProjects(projectsResponse.data);
+        const response = await axios.get('http://localhost:3000/api/projects');
+        setProjects(response.data);
       } catch (error) {
         console.error('Erro ao buscar projetos:', error);
         setError('Error fetching projects');
       }
     };
-
     fetchProjects();
   }, []);
 
-  // Buscar sprints de um projeto selecionado
   const handleProjectChange = async (event) => {
     const selectedProject = event.target.value;
     setProject(selectedProject);
-    setSprint('');
     setSprintData(null);
     setError(null);
     setLoadingSprints(true);
 
     try {
-      const currentWork = await axios.get(`http://localhost:3000/api/projects/${selectedProject}/current-work`);
-      console.log(currentWork)
+      const response = await axios.get(
+        `http://localhost:3000/api/projects/${selectedProject}/current-work`
+      );
+      console.log(response)
+      setSprintData(response.data.data);
     } catch (error) {
-      console.error('Erro ao buscar sprints:', error);
-      setError('Error fetching sprints');
+      console.error('Erro ao buscar sprint atual:', error);
+      setError('Error fetching sprint data');
     } finally {
       setLoadingSprints(false);
     }
   };
 
-  // Gerar o PDF da tela inteira
+  const filterCancelledIssues = (issues) => {
+    return issues.filter(issue => issue.fields.status.name.toUpperCase() !== 'CANCELADO');
+  };
+
+  const groupIssuesByAssignee = (issues) => {
+    const filteredIssues = filterCancelledIssues(issues);
+
+    const grouped = filteredIssues.reduce((acc, issue) => {
+      const assignee = issue.fields.assignee?.displayName || 'Unassigned';
+      const timeSpent = issue.fields.timetracking.timeSpentSeconds || 0;
+      const status = issue.fields.status.name.toUpperCase();
+      const isDone = status === 'DONE';
+      const isInProgress = status === 'IN PROGRESS';
+
+      if (!acc[assignee]) {
+        acc[assignee] = { totalCards: 0, doneCards: 0, inProgressCards: 0, timeSpent: 0 };
+      }
+
+      acc[assignee].totalCards += 1;
+      acc[assignee].timeSpent += timeSpent;
+      if (isDone) acc[assignee].doneCards += 1;
+      if (isInProgress) acc[assignee].inProgressCards += 1;
+
+      return acc;
+    }, {});
+
+    return Object.entries(grouped).map(([assignee, data]) => ({
+      assignee,
+      totalCards: data.totalCards,
+      doneCards: data.doneCards,
+      inProgressCards: data.inProgressCards,
+      timeSpent: Math.floor(data.timeSpent / 3600), // Converter para horas inteiras
+    }));
+  };
+
+  const getStatusCounts = (issues) => {
+    const filteredIssues = filterCancelledIssues(issues);
+
+    const statusCounts = filteredIssues.reduce((acc, issue) => {
+      const status = issue.fields.status.name;
+      acc[status] = (acc[status] || 0) + 1;
+      return acc;
+    }, {});
+
+    return Object.entries(statusCounts).map(([status, count]) => ({ status, count }));
+  };
+
   const generatePDF = () => {
     const input = document.getElementById('pdfContent');
     html2canvas(input).then((canvas) => {
@@ -85,27 +125,9 @@ const JiraReport = () => {
     });
   };
 
-  // Dados para o gráfico de progresso do Sprint
-  const data = {
-    labels: ['Completed', 'Blocked', 'In Progress'],
-    datasets: [
-      {
-        label: 'Sprint Progress',
-        data: [
-          sprintData?.completed || 0,
-          sprintData?.blocked || 0,
-          sprintData?.inProgress || 0
-        ],
-        backgroundColor: ['#36A2EB', '#FF6384', '#FFCE56'],
-        hoverBackgroundColor: ['#36A2EB', '#FF6384', '#FFCE56'],
-      },
-    ],
-  };
-
   return (
     <Container>
-      {/* Menu Lateral */}
-      <Drawer variant="permanent" open={open}>
+      <Drawer variant="permanent" open={true}>
         <List>
           <ListItem button>
             <ListItemText primary="Dashboard" />
@@ -113,99 +135,114 @@ const JiraReport = () => {
           <ListItem button>
             <ListItemText primary="Reports" />
           </ListItem>
-          <ListItem button>
-            <ListItemText primary="Settings" />
-          </ListItem>
         </List>
       </Drawer>
 
-      {/* Conteúdo principal */}
-      <Paper elevation={3} style={{ padding: '20px', marginTop: '20px' }} id="pdfContent">
+      <Paper elevation={3} style={{ padding: '20px', marginTop: '20px' }}>
         <Typography variant="h4" align="center" gutterBottom>
           Sprint Overview Summary Report
         </Typography>
 
         {error && <Typography color="error">{error}</Typography>}
 
-        <Box display="flex" flexDirection={{ xs: 'column', md: 'row' }} gap={3}>
-          {/* Seleção de Projeto */}
-          <Box flex={1}>
-            <FormControl fullWidth>
-              <InputLabel id="project-label">Select Project</InputLabel>
-              <Select
-                labelId="project-label"
-                value={project}
-                onChange={handleProjectChange}
-                label="Select Project"
-              >
-                {projects.map((proj) => (
-                  <MenuItem key={proj.id} value={proj.id}>{proj.name}</MenuItem>
+        <FormControl fullWidth>
+          <InputLabel id="project-label">Select Project</InputLabel>
+          <Select value={project} onChange={handleProjectChange}>
+            {projects.map((proj) => (
+              <MenuItem key={proj.id} value={proj.id}>
+                {proj.name}
+              </MenuItem>
+            ))}
+          </Select>
+        </FormControl>
+
+        {sprintData && (
+          <>
+            <Box display="flex" justifyContent="space-between" alignItems="center" flexDirection={{ xs: 'column', md: 'row' }} gap={3} marginTop={3}>
+              <Box flex={1}>
+                <Typography variant="h6">Sprint Details</Typography>
+                <Typography variant="body1">Sprint ID: {sprintData.activeSprint.id}</Typography>
+                <Typography variant="body1">Sprint Name: {sprintData.activeSprint.name}</Typography>
+              </Box>
+
+              <Box flex={1}>
+                <Typography variant="h6">Board Details</Typography>
+                <Typography variant="body1">Board ID: {sprintData.board.id}</Typography>
+                <Typography variant="body1">Project Name: {sprintData.board.location.name}</Typography>
+                <Typography variant="body1">
+                  Total Cards: {filterCancelledIssues(sprintData.issues).length}
+                </Typography>
+              </Box>
+
+              <Box flex={1} justifyContent="flex-end">
+                <Button variant="contained" onClick={generatePDF} style={{ marginTop: '20px', background: '#573996' }}>
+                  Export to PDF
+                </Button>
+              </Box>
+            </Box>
+
+            <FormControl fullWidth style={{ marginTop: '20px' }}>
+              <InputLabel>Filter by Assignee</InputLabel>
+              <Select value={assigneeFilter} onChange={(e) => setAssigneeFilter(e.target.value)}>
+                <MenuItem value="">All</MenuItem>
+                {groupIssuesByAssignee(sprintData.issues).map(({ assignee }) => (
+                  <MenuItem key={assignee} value={assignee}>
+                    {assignee}
+                  </MenuItem>
                 ))}
               </Select>
             </FormControl>
-          </Box>
-        </Box>
 
-        {/* Exibe o relatório apenas se houver dados do sprint */}
-        {sprintData && (
-          <>
-            <Box display="flex" flexDirection={{ xs: 'column', md: 'row' }} gap={3} marginTop={3}>
-              <Box flex={1}>
-                <Typography variant="h6">Sprint Details</Typography>
-                <Typography variant="body1">Sprint No: {sprintData.sprintNumber}</Typography>
-                <Typography variant="body1">Release Start Date: {sprintData.releaseStartDate}</Typography>
-                <Typography variant="body1">Release End Date: {sprintData.releaseEndDate}</Typography>
-              </Box>
+            <Box id='pdfContent'>
+              <TableContainer component={Paper} style={{ marginTop: '20px' }}>
+                <Table>
+                  <TableHead style={{ background: '#573996' }}>
+                    <TableRow>
+                      <TableCell style={{ color: '#FFFF' }}>Assignee</TableCell>
+                      <TableCell style={{ color: '#FFFF' }}>Total Cards</TableCell>
+                      <TableCell style={{ color: '#FFFF' }}>In Progress Cards</TableCell>
+                      <TableCell style={{ color: '#FFFF' }}>Done Cards</TableCell>
+                      <TableCell style={{ color: '#FFFF' }}>Time Spent (hours)</TableCell>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody style={{ background: '#FFFF' }}>
+                    {groupIssuesByAssignee(sprintData.issues)
+                      .filter((row) => !assigneeFilter || row.assignee === assigneeFilter)
+                      .map((row, index) => (
+                        <TableRow key={index}>
+                          <TableCell>{row.assignee}</TableCell>
+                          <TableCell>{row.totalCards}</TableCell>
+                          <TableCell>{row.inProgressCards}</TableCell>
+                          <TableCell>{row.doneCards}</TableCell>
+                          <TableCell>{row.timeSpent} h</TableCell>
+                        </TableRow>
+                      ))}
+                  </TableBody>
+                </Table>
+              </TableContainer>
 
-              <Box flex={1}>
-                <Typography variant="h6">Sprint Progress</Typography>
-                <Typography variant="body1">Completed: {sprintData.completed}%</Typography>
-                <Typography variant="body1">Blocked: {sprintData.blocked}%</Typography>
-                <Typography variant="body1">In Progress: {sprintData.inProgress}%</Typography>
-              </Box>
-            </Box>
 
-            {/* Gráfico de Rosca */}
-            <Box marginTop={3}>
-              <Typography variant="h6">Sprint Progress Chart</Typography>
-              <Doughnut data={data} />
-            </Box>
-
-            {/* Planejamento de Tarefas */}
-            <Box marginTop={3}>
-              <Typography variant="h6">Sprint Task Planning</Typography>
+              <Typography variant="h6" style={{ marginTop: '20px' }}>
+                Status Summary
+              </Typography>
               <TableContainer component={Paper}>
                 <Table>
-                  <TableHead>
+                  <TableHead style={{ background: '#573996' }}>
                     <TableRow>
-                      <TableCell>Assignee</TableCell>
-                      <TableCell>Assigned</TableCell>
-                      <TableCell>Blocked</TableCell>
-                      <TableCell>Fixed</TableCell>
-                      <TableCell>Submitted</TableCell>
-                      <TableCell>Hours</TableCell>
+                      <TableCell style={{ color: '#FFFF' }}>Status</TableCell>
+                      <TableCell style={{ color: '#FFFF' }}>Count</TableCell>
                     </TableRow>
                   </TableHead>
                   <TableBody>
-                    {sprintData.tasks.map((task) => (
-                      <TableRow key={task.id}>
-                        <TableCell>{task.assignee}</TableCell>
-                        <TableCell>{task.assigned}</TableCell>
-                        <TableCell>{task.blocked}</TableCell>
-                        <TableCell>{task.fixed}</TableCell>
-                        <TableCell>{task.submitted}</TableCell>
-                        <TableCell>{task.hours}</TableCell>
+                    {getStatusCounts(sprintData.issues).map((row, index) => (
+                      <TableRow key={index}>
+                        <TableCell>{row.status}</TableCell>
+                        <TableCell>{row.count}</TableCell>
                       </TableRow>
                     ))}
                   </TableBody>
                 </Table>
               </TableContainer>
-            </Box>
-
-            <Box marginTop={3}>
-              <Button variant="contained" color="primary" onClick={generatePDF}>
-                Export to PDF
-              </Button>
             </Box>
           </>
         )}
