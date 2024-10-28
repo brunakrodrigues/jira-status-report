@@ -19,10 +19,13 @@ import {
   List,
   ListItem,
   ListItemText,
+  Avatar,
 } from '@mui/material';
 import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas';
 import axios from 'axios';
+import ErrorImage from './ErrorImage';
+import GenericTable from './GenericTable';
 
 const JiraReport = () => {
   const [projects, setProjects] = useState([]);
@@ -37,6 +40,7 @@ const JiraReport = () => {
       try {
         const response = await axios.get('http://localhost:3000/api/projects');
         setProjects(response.data);
+        console.log(response)
       } catch (error) {
         console.error('Erro ao buscar projetos:', error);
         setError('Error fetching projects');
@@ -56,7 +60,6 @@ const JiraReport = () => {
       const response = await axios.get(
         `http://localhost:3000/api/projects/${selectedProject}/current-work`
       );
-      console.log(response)
       setSprintData(response.data.data);
     } catch (error) {
       console.error('Erro ao buscar sprint atual:', error);
@@ -75,13 +78,23 @@ const JiraReport = () => {
 
     const grouped = filteredIssues.reduce((acc, issue) => {
       const assignee = issue.fields.assignee?.displayName || 'Unassigned';
+      const accountId = issue.fields.assignee?.accountId || null;
+      const avatarUrl = issue.fields.assignee?.avatarUrls['48x48'];
+
       const timeSpent = issue.fields.timetracking.timeSpentSeconds || 0;
       const status = issue.fields.status.name.toUpperCase();
       const isDone = status === 'DONE';
       const isInProgress = status === 'IN PROGRESS';
 
       if (!acc[assignee]) {
-        acc[assignee] = { totalCards: 0, doneCards: 0, inProgressCards: 0, timeSpent: 0 };
+        acc[assignee] = {
+          accountId,
+          avatarUrl,
+          totalCards: 0,
+          doneCards: 0,
+          inProgressCards: 0,
+          timeSpent: 0
+        };
       }
 
       acc[assignee].totalCards += 1;
@@ -94,10 +107,8 @@ const JiraReport = () => {
 
     return Object.entries(grouped).map(([assignee, data]) => ({
       assignee,
-      totalCards: data.totalCards,
-      doneCards: data.doneCards,
-      inProgressCards: data.inProgressCards,
-      timeSpent: Math.floor(data.timeSpent / 3600), // Converter para horas inteiras
+      ...data,
+      timeSpent: Math.floor(data.timeSpent / 3600),
     }));
   };
 
@@ -125,6 +136,28 @@ const JiraReport = () => {
     });
   };
 
+  const assigneeColumns = [
+    {
+      id: 'assignee',
+      label: 'Assignee',
+      render: (row) => (
+        <Box display="flex" alignItems="center" gap={2}>
+          {row.avatarUrl ? <Avatar src={row.avatarUrl} /> : <Avatar>{row.assignee[0]}</Avatar>}
+          <Typography>{row.assignee}</Typography>
+        </Box>
+      ),
+    },
+    { id: 'totalCards', label: 'Total Cards' },
+    { id: 'inProgressCards', label: 'In Progress Cards' },
+    { id: 'doneCards', label: 'Done Cards' },
+    { id: 'timeSpent', label: 'Time Spent (hours)' },
+  ];
+
+  const statusColumns = [
+    { id: 'status', label: 'Status' },
+    { id: 'count', label: 'Count' },
+  ];
+
   return (
     <Container>
       <Drawer variant="permanent" open={true}>
@@ -143,18 +176,20 @@ const JiraReport = () => {
           Sprint Overview Summary Report
         </Typography>
 
-        {error && <Typography color="error">{error}</Typography>}
-
         <FormControl fullWidth>
           <InputLabel id="project-label">Select Project</InputLabel>
           <Select value={project} onChange={handleProjectChange}>
-            {projects.map((proj) => (
-              <MenuItem key={proj.id} value={proj.id}>
-                {proj.name}
-              </MenuItem>
-            ))}
+            {projects
+              .sort((a, b) => a.name.localeCompare(b.name))
+              .map((proj) => (
+                <MenuItem key={proj.id} value={proj.id}>
+                  {proj.name}
+                </MenuItem>
+              ))}
           </Select>
         </FormControl>
+
+        {error && <ErrorImage />}
 
         {sprintData && (
           <>
@@ -181,7 +216,7 @@ const JiraReport = () => {
               </Box>
             </Box>
 
-            <FormControl fullWidth style={{ marginTop: '20px' }}>
+            {/* <FormControl fullWidth style={{ marginTop: '20px' }}>
               <InputLabel>Filter by Assignee</InputLabel>
               <Select value={assigneeFilter} onChange={(e) => setAssigneeFilter(e.target.value)}>
                 <MenuItem value="">All</MenuItem>
@@ -191,58 +226,19 @@ const JiraReport = () => {
                   </MenuItem>
                 ))}
               </Select>
-            </FormControl>
+            </FormControl> */}
 
             <Box id='pdfContent'>
-              <TableContainer component={Paper} style={{ marginTop: '20px' }}>
-                <Table>
-                  <TableHead style={{ background: '#573996' }}>
-                    <TableRow>
-                      <TableCell style={{ color: '#FFFF' }}>Assignee</TableCell>
-                      <TableCell style={{ color: '#FFFF' }}>Total Cards</TableCell>
-                      <TableCell style={{ color: '#FFFF' }}>In Progress Cards</TableCell>
-                      <TableCell style={{ color: '#FFFF' }}>Done Cards</TableCell>
-                      <TableCell style={{ color: '#FFFF' }}>Time Spent (hours)</TableCell>
-                    </TableRow>
-                  </TableHead>
-                  <TableBody style={{ background: '#FFFF' }}>
-                    {groupIssuesByAssignee(sprintData.issues)
-                      .filter((row) => !assigneeFilter || row.assignee === assigneeFilter)
-                      .map((row, index) => (
-                        <TableRow key={index}>
-                          <TableCell>{row.assignee}</TableCell>
-                          <TableCell>{row.totalCards}</TableCell>
-                          <TableCell>{row.inProgressCards}</TableCell>
-                          <TableCell>{row.doneCards}</TableCell>
-                          <TableCell>{row.timeSpent} h</TableCell>
-                        </TableRow>
-                      ))}
-                  </TableBody>
-                </Table>
-              </TableContainer>
-
-
-              <Typography variant="h6" style={{ marginTop: '20px' }}>
-                Status Summary
-              </Typography>
-              <TableContainer component={Paper}>
-                <Table>
-                  <TableHead style={{ background: '#573996' }}>
-                    <TableRow>
-                      <TableCell style={{ color: '#FFFF' }}>Status</TableCell>
-                      <TableCell style={{ color: '#FFFF' }}>Count</TableCell>
-                    </TableRow>
-                  </TableHead>
-                  <TableBody>
-                    {getStatusCounts(sprintData.issues).map((row, index) => (
-                      <TableRow key={index}>
-                        <TableCell>{row.status}</TableCell>
-                        <TableCell>{row.count}</TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </TableContainer>
+              <GenericTable
+                columns={assigneeColumns}
+                data={groupIssuesByAssignee(sprintData.issues)}
+                title="Assignee Summary"
+              />
+              <GenericTable
+                columns={statusColumns}
+                data={getStatusCounts(sprintData.issues)}
+                title="Status Summary"
+              />
             </Box>
           </>
         )}
