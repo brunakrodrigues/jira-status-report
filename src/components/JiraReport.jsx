@@ -1,29 +1,23 @@
-import React, { useState, useEffect } from 'react';
 import {
-  Container,
+  Avatar,
   Box,
-  Paper,
-  Typography,
-  Table,
-  TableBody,
-  TableCell,
-  TableContainer,
-  TableHead,
-  TableRow,
   Button,
-  Select,
-  MenuItem,
+  Container,
+  Drawer,
   FormControl,
   InputLabel,
-  Drawer,
   List,
   ListItem,
   ListItemText,
-  Avatar,
+  MenuItem,
+  Paper,
+  Select,
+  Typography
 } from '@mui/material';
-import jsPDF from 'jspdf';
-import html2canvas from 'html2canvas';
 import axios from 'axios';
+import html2canvas from 'html2canvas';
+import jsPDF from 'jspdf';
+import React, { useEffect, useState } from 'react';
 import ErrorImage from './ErrorImage';
 import GenericTable from './GenericTable';
 

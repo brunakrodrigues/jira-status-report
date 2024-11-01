@@ -1,15 +1,15 @@
-import React, { useState } from 'react';
 import {
+  Paper,
   Table,
   TableBody,
   TableCell,
   TableContainer,
   TableHead,
   TableRow,
-  Paper,
-  Typography,
   TableSortLabel,
+  Typography,
 } from '@mui/material';
+import React, { useState } from 'react';
 
 const GenericTable = ({ columns, data, title, emptyMessage = 'No data available' }) => {
   const [order, setOrder] = useState('asc');

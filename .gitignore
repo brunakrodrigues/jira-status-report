@@ -8,6 +8,8 @@
 # testing
 /coverage
 
+eslint-disable-next-line
+
 # production
 /build
 

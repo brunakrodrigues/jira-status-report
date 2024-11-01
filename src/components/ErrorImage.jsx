@@ -1,5 +1,5 @@
-import React from 'react';
 import { Box, Typography } from '@mui/material';
+import React from 'react';
 import errorGif from '../assets/images/error.gif'; // Importando o GIF corretamente
 
 const ErrorImage = () => {
